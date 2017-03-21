@@ -353,6 +353,7 @@ lib/LaTeXML/Package/apjfonts.sty.ltxml
 lib/LaTeXML/Package/applemac.def.ltxml
 lib/LaTeXML/Package/array.sty.ltxml
 lib/LaTeXML/Package/article.cls.ltxml
+lib/LaTeXML/Package/attachfile.sty.ltxml
 lib/LaTeXML/Package/authblk.sty.ltxml
 lib/LaTeXML/Package/avant.sty.ltxml
 lib/LaTeXML/Package/babel.sty.ltxml
@@ -482,6 +483,7 @@ lib/LaTeXML/Package/mathptm.sty.ltxml
 lib/LaTeXML/Package/mathptmx.sty.ltxml
 lib/LaTeXML/Package/mathrsfs.sty.ltxml
 lib/LaTeXML/Package/mathtools.sty.ltxml
+lib/LaTeXML/Package/mleftright.sty.ltxml
 lib/LaTeXML/Package/mn.cls.ltxml
 lib/LaTeXML/Package/mn2e.cls.ltxml
 lib/LaTeXML/Package/mn2e_support.sty.ltxml
@@ -537,6 +539,7 @@ lib/LaTeXML/Package/slashed.sty.ltxml
 lib/LaTeXML/Package/slides.cls.ltxml
 lib/LaTeXML/Package/soul.sty.ltxml
 lib/LaTeXML/Package/srcltx.sty.ltxml
+lib/LaTeXML/Package/stmaryrd.sty.ltxml
 lib/LaTeXML/Package/subfig.sty.ltxml
 lib/LaTeXML/Package/subfigure.sty.ltxml
 lib/LaTeXML/Package/subfloat.sty.ltxml
@@ -546,6 +549,7 @@ lib/LaTeXML/Package/svg.sty.ltxml
 lib/LaTeXML/Package/svmult.cls.ltxml
 lib/LaTeXML/Package/sv_support.sty.ltxml
 lib/LaTeXML/Package/tabularx.sty.ltxml
+lib/LaTeXML/Package/tabulary.sty.ltxml
 lib/LaTeXML/Package/TeX.pool.ltxml
 lib/LaTeXML/Package/textcomp.sty.ltxml
 lib/LaTeXML/Package/texvc.sty.ltxml
@@ -583,7 +587,9 @@ lib/LaTeXML/Package/amsb.fontmap.ltxml
 lib/LaTeXML/Package/ot4.fontmap.ltxml
 lib/LaTeXML/Package/ulem.sty.ltxml
 lib/LaTeXML/Package/utf8.def.ltxml
+lib/LaTeXML/Package/wasysym.sty.ltxml
 lib/LaTeXML/Package/xunicode.sty.ltxml
+
 #==================================================
 # TeX packages
 #==================================================
@@ -614,6 +620,9 @@ t/92_profiles.t
 t/93_formats.t
 t/94_runtimes.t
 t/95_complex_config.t
+t/alignment/algx.pdf
+t/alignment/algx.tex
+t/alignment/algx.xml
 t/alignment/array.pdf
 t/alignment/array.tex
 t/alignment/array.xml
@@ -1165,6 +1174,8 @@ t/tokenize/verbata.xml
 t/daemon/citations.tex
 t/daemon/document.tex
 t/daemon/fragment.tex
+t/daemon/mixedmath.tex
+t/daemon/mixedmath.latexml
 t/daemon/post.tex
 t/daemon/pre.tex
 t/daemon/tiny.bib
@@ -1183,6 +1194,9 @@ t/daemon/formats/citationraw.xml
 t/daemon/formats/makebib.spec
 t/daemon/formats/makebib.status
 t/daemon/formats/makebib.xml
+t/daemon/formats/mixedmath.spec
+t/daemon/formats/mixedmath.status
+t/daemon/formats/mixedmath.xml
 t/daemon/formats/noparse.spec
 t/daemon/formats/noparse.status
 t/daemon/formats/noparse.xml

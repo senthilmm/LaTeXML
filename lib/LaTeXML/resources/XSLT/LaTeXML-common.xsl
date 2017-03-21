@@ -21,7 +21,7 @@
     xmlns:func  = "http://exslt.org/functions"
     xmlns:f     = "http://dlmf.nist.gov/LaTeXML/functions"
     xmlns:xhtml = "http://www.w3.org/1999/xhtml"
-    extension-element-prefixes="func f"
+    extension-element-prefixes="func f exsl string date"
     exclude-result-prefixes = "ltx f func string">
 
   <!-- ALL CAPS parameters are intended to be passed in;
@@ -650,6 +650,18 @@
       <dummy><xsl:attribute name="{concat($prefix,':dummy')}" namespace="{$url}"/></dummy>
     </xsl:variable>
     <xsl:copy-of select="exsl:node-set($dummy)/*/namespace::*"/>
+  </xsl:template>
+
+  <!-- Add a data scheme url attribute (typically href) containing the data
+       stored in @data, according to @datatype and @dataencoding -->
+  <xsl:template name="add_data_attribute">
+    <xsl:param name="name"/>
+    <xsl:attribute name="{$name}">
+      <xsl:value-of select="concat('data:',
+                            f:if(@datamimetype,@datamimetype,'text/plain'),
+                            f:if(@dataencoding, concat(';',@dataencoding),''),
+                            ',',@data)"/>
+    </xsl:attribute>
   </xsl:template>
 
 </xsl:stylesheet>

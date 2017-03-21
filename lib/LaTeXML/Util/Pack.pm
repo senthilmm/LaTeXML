@@ -21,6 +21,7 @@ use Archive::Zip qw(:CONSTANTS :ERROR_CODES);
 
 use base qw(Exporter);
 our @EXPORT = qw(&unpack_source &pack_collection);
+our $archive_file_exclusion_regex = qr/(?:^\.)|(?:\.(?:zip|gz|epub|tex|bib|mobi|cache)$)|(?:~$)/;
 
 sub unpack_source {
   my ($source, $sandbox_directory) = @_;
@@ -40,8 +41,8 @@ sub unpack_source {
     $zip_handle->extractMember($member, catfile($sandbox_directory, $member)); }
   # Set $source to point to the main TeX file in that directory
   my @TeX_file_members = map { $_->fileName() } $zip_handle->membersMatching('\.tex$');
-  if (!@TeX_file_members) { # No .tex file? Try files without extensions!
-    @TeX_file_members = map { $_->fileName() } grep {!/\./ || /\.[^.]{4,}$/} $zip_handle->members();
+  if (!@TeX_file_members) { # No .tex file? Try files with no, or unusually long, extensions
+    @TeX_file_members = grep {!/\./ || /\.[^.]{4,}$/} map { $_->fileName() } $zip_handle->members();
   }
 
   # Heuristically determine the input (borrowed from arXiv::FileGuess)
@@ -182,7 +183,7 @@ sub get_archive {
     or (print STDERR 'Fatal:expected:directory Failed to compress directory \'$directory\': $@');
   my @entries = grep { /^[^.]/ } readdir($dirhandle);
   closedir $dirhandle;
-  my @files = grep { (!/(?:zip|gz|epub|tex|bib|mobi|~)$/) && -f pathname_concat($directory, $_) } @entries;
+  my @files = grep { !/$archive_file_exclusion_regex/ && -f pathname_concat($directory, $_) } @entries;
   my @subdirs = grep { -d File::Spec->catdir($directory, $_) } @entries;
  # We want to first add the files instead of simply invoking ->addTree on the top level
  # without ANY file attributes at all,
@@ -209,7 +210,7 @@ sub get_archive {
 
   foreach my $subdir (sort @subdirs) {
     my $current_dir = File::Spec->catdir($directory, $subdir);
-    $archive->addTree($current_dir, $subdir, sub { /^[^.]/ && (!/\.(?:zip|gz|epub|mobi|~)$/) }, COMPRESSION_STORED); }
+    $archive->addTree($current_dir, $subdir, sub { !/$archive_file_exclusion_regex/ }, COMPRESSION_STORED); }
 
   my $payload;
   if ($whatsout =~ /^archive(::zip)?$/) {

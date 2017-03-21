@@ -164,7 +164,7 @@ if ($result) {
       binmode($output_handle, ":encoding(UTF-8)"); }
     print $output_handle $result;
     close $output_handle;
-  } else { 
+  } else {
     if (!$is_archive) { # If we're not outputing binary data, encode to UTF-8
       binmode(STDOUT, ":encoding(UTF-8)"); }
     print STDOUT $result, "\n"; }    #Output to STDOUT
@@ -198,8 +198,8 @@ sub process_local {
   my $req_message_length = length($req_message);
   $req_route = "$req_address:$req_port" unless $req_route;
   my $payload = <<"PAYLOADEND";
-POST $route HTTP/1.0
-Host: $address:$req_port
+POST $req_route HTTP/1.0
+Host: $req_address:$req_port
 User-Agent: latexmlc
 Content-Type: application/x-www-form-urlencoded
 Content-Length: $req_message_length
@@ -232,13 +232,13 @@ __END__
 
 =head1 NAME
 
-C<latexmlc> - A omni-executable for LaTeXML, capable of
-  stand-alone socket-server and (soon) web service conversion.
+C<latexmlc> - An omni-executable for LaTeXML, capable of
+  stand-alone, socket-server and web service conversion.
+  Supports both core processing and post-processing.
 
 =head1 SYNOPSYS
 
 See the OPTIONS section in L<LaTeXML::Common::Config> for usage information.
-  Also consult latexmlc --help
 
 =head1 DESCRIPTION
 
@@ -247,10 +247,10 @@ L<latexmlc> provides a client which automatically sets up a LaTeXML local server
 
   If such server already exists, the client proceeds to communicate normally.
 
-  A stand-alone conversion (the default) can also be requested via --timeout=-1
+  A stand-alone conversion (the default) can also be requested via --expire=-1
 
 =head1 SEE ALSO
 
-L<latexmls>, L<ltxmojo>, L<LaTeXML::Common::Config>
+L<LaTeXML::Common::Config>
 
 =cut

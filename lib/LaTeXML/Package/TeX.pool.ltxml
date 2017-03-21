@@ -327,7 +327,11 @@ DefParameterType('Register', sub {
     else {
       Error('expected', '<register>', $gullet,
         "A <register> was supposed to be here", "Got " . Stringify($token));
-      undef; } },
+      if (isDefinable($token)) {
+        DefRegisterI($token, undef, Tokens());
+        return [$defn]; }
+      else {
+        return; } } },
   reversion => sub {
     my ($var) = @_;
     my ($defn, @args) = @$var;
@@ -360,7 +364,8 @@ DefParameterType('DirectoryList', sub {
       my @dirs = ();
       while ($gullet->ifNext(T_BEGIN)) {
         # Should these be Semiverbatim ??
-        push(@dirs, $gullet->readArg); }
+        push(@dirs, $gullet->readArg);
+        $gullet->readMatch(T_OTHER(',')); }
       if ($gullet->ifNext(T_END)) {
         $gullet->readToken; }
       else {
@@ -587,6 +592,7 @@ DefMacro('\@ifundefined{}{}{}', sub {
 
 sub isDefinable {
   my ($token) = @_;
+  return unless $token;
   my $meaning = LookupMeaning($token);
   my $name = $token->getString; $name =~ s/^\\//;
   return (((!defined $meaning) || ($meaning eq LookupMeaning(T_CS('\relax'))))
@@ -673,7 +679,18 @@ Let('\protect', '\relax');
 #======================================================================
 
 DefMacro('\romannumeral Number', sub { roman($_[1]->valueOf); });
-DefMacro('\string Token',        sub { ExplodeText($_[1]->getString); });
+#DefMacro('\string Token',        sub { ExplodeText($_[1]->getString); });
+# Hmm... I wonder, should getString itself be dealing with escapechar?
+sub escapechar {
+  my $code = LookupRegister('\escapechar')->valueOf;
+  return (($code >= 0) && ($code <= 255) ? chr($code) : ''); }
+
+DefMacro('\string Token', sub {
+    my $s = $_[1]->getString;
+    if ($s =~ s/^\\//) {
+      $s = escapechar() . $s; }
+    ExplodeText($s); });
+
 DefMacroI('\jobname', undef, Tokens());    # Set to the filename by initialization
 
 DefMacroI('\fontname', undef, sub { Explode("fontname not implemented"); });
@@ -735,9 +752,8 @@ DefMacro('\meaning Token', sub {
 
 DefParameterType('CSName', sub {
     my ($gullet) = @_;
-##    my ($token, @toks) = ();
     my $token;
-    my $cs = '\\';
+    my $cs = escapechar();
     my $s;
     # keep newlines from having \n inside!
     while (($token = $gullet->readXToken(0)) && (($s = $token->getString) ne '\endcsname')) {
@@ -749,9 +765,7 @@ DefParameterType('CSName', sub {
         else {
           Error('undefined', $token, $gullet, "The token " . Stringify($token) . " is not defined"); } }
       # Keep newlines from having \n!
-##      push(@toks, ($cc == CC_SPACE ? T_SPACE : $token)); }
       $cs .= ($cc == CC_SPACE ? ' ' : $s); }
-##    T_CS("\\" . ToString(Tokens(@toks))); });
     T_CS($cs); });
 
 DefMacro('\csname CSName', sub {
@@ -768,7 +782,7 @@ DefPrimitive('\endcsname', sub {
 DefMacro('\expandafter Token Token', sub {
     my ($gullet, $tok, $xtok) = @_;
     my $defn;
-    if (defined($defn = LookupDefinition($xtok)) && $defn->isExpandable) {
+    if (defined($defn = $STATE->lookupExpandable($xtok))) {
       # Note that IF expandafter ends up expanding a \the in an \edef,
       # that it Overrides the implicit noexpand that \edef would normally use for\the!!
       local $LaTeXML::NOEXPAND_THE = undef;
@@ -848,7 +862,7 @@ DefRegister('\tracingcommands', Number(0),
     tracinglostchars => 1,
     tracingrestores  => 0, language => 0, uchyph => 1, lefthyphenmin => 0,
     righthyphenmin   => 0, globaldefs => 0, defaulthyphenchar => ord('-'), defaultskewchar => -1,
-    escapechar       => 0, endlinechar => 0, newlinechar => -1, maxdeadcycles => 0, hangafter => 0,
+    escapechar => ord('\\'), endlinechar => 0, newlinechar => -1, maxdeadcycles => 0, hangafter => 0,
     fam  => -1, mag => 1000, magnification => 1000, delimiterfactor => 0,
     time => 0,  day => 0,    month         => 0,    year            => 0,
     showboxbreadth => 5, showboxdepth => 3, errorcontextlines => 5);
@@ -1887,6 +1901,8 @@ DefConstructor('\vrule RuleSpecification',
         $whatsit->setProperty(isVerticalRule => 1) } }
     elsif ((defined $w) && ($w == 0)) {
       $whatsit->setProperty(invisible => 1); }
+    else {
+      $dims->setValue(width => '1px') unless defined $w; }
     if (my $color = LookupValue('font')->getColor) {
       if ($color ne 'black') {
         $whatsit->setProperty(color => $color); } }
@@ -2089,7 +2105,7 @@ DefPrimitive('\immediate', undef);
 DefPrimitive('\special {}',     undef);
 DefPrimitive('\penalty Number', undef);
 DefPrimitive('\kern Dimension', undef);
-DefPrimitive('\mkern MuGlue',   undef);
+DefMacro('\mkern MuGlue', '\ifmmode\@math@mskip #1\relax\else\@text@mskip #1\relax\fi');
 DefPrimitiveI('\unpenalty', undef, undef);
 DefPrimitiveI('\unkern',    undef, undef);
 ## Worrisome, but...
@@ -2193,8 +2209,10 @@ DefConstructor('\tabularcell@hbox HBoxContents',
   beforeDigest => sub {
     ## reenterTextMode();  # BUT NOT \\\\ !!!!!!
     Let(T_MATH,        '\@dollar@in@textmode');
-    Let('\centerline', '\relax');
-  });
+    Let('\centerline', '\relax'); },
+  afterConstruct => sub {    # Override nowrap on right,left,center cells
+    my $cell = $_[0]->getElement;
+    $_[0]->addClass($cell, 'ltx_wrap') unless ($cell->getAttribute('align') || '') eq 'justify'; });
 
 DefColumnType('p{Dimension}', sub {
     $LaTeXML::BUILD_TEMPLATE->addColumn(before => Tokens(T_CS('\tabularcell@hbox'), T_BEGIN),
@@ -3122,7 +3140,7 @@ sub cleanup_XMText {
     my $child = $children[0];
     $document->setNodeFont($textnode, $document->getNodeFont($child));
     foreach my $attr ($child->attributes) {    # Copy the child's attributes (should Merge!!)
-      $textnode->setAttribute($attr->nodeName => $attr->getValue); }
+      $textnode->setAttribute($attr->nodeName => $attr->getValue) unless $attr->nodeName eq 'xml:id'; }
     $document->unwrapNodes($child); }
 
   # Now apply a simplifying rule for nested Math
@@ -3170,7 +3188,12 @@ sub cleanup_XMText {
             $document->wrapNodes('ltx:XMText', $m); }
         } } }
     # And now we don't need the XMText any more.
-    $document->unwrapNodes($textnode); }
+    foreach my $attr ($textnode->attributes) {    # Copy the child's attributes (should Merge!!)
+      $table->setAttribute($attr->nodeName => $attr->getValue); }
+    my $newtable = $document->unwrapNodes($textnode);
+    if (my $id = $textnode->getAttribute('xml:id')) {
+      $document->unRecordID($id);
+      $document->recordID($id, $newtable); } }
   return; }
 
 #**********************************************************************
@@ -3961,61 +3984,42 @@ sub TestNode {
     && ((!defined $content) || (($node->textContent || '') eq $content))
     && !grep { $node->getAttribute($_) ne $attrib{$_} } keys %attrib; }
 
+# Recognize !!
+DefMathLigature("!!" => "!!", role => 'POSTFIX', meaning => 'double-factorial');
+
 # Recognize :=
-DefMathLigature(sub { my ($document, @nodes) = @_;
-    if ((scalar(@nodes) > 2)
-      && TestNode($nodes[-2], 'ltx:XMTok', ':')
-      && TestNode($nodes[-1], 'ltx:XMTok', '=')) {
-      (2, ":=", meaning => 'assign', role => 'RELOP'); } });
+DefMathLigature(":=" => ":=", role => 'RELOP', meaning => 'assign');
 
 # Recognize: <=, << and <<<
-DefMathLigature(sub { my ($document, @nodes) = @_;
-    if ((scalar(@nodes) > 2)
-      && TestNode($nodes[-2], 'ltx:XMTok', '<')) {
-      if (TestNode($nodes[-1], 'ltx:XMTok', '=')) {
-        (2, "\x{2264}", role => 'RELOP', meaning => 'less-than-or-equals'); }
-      elsif (TestNode($nodes[-1], 'ltx:XMTok', '<')) {
-        (2, "\x{226A}", role => 'RELOP', meaning => 'much-less-than'); } } });
-# Note that << will already have been converted to \ll !!!
-DefMathLigature(sub { my ($document, @nodes) = @_;
-    if ((scalar(@nodes) > 2)
-      && TestNode($nodes[-2], 'ltx:XMTok', "\x{226A}")
-      && TestNode($nodes[-1], 'ltx:XMTok', '<')) {
-      (2, "\x{22D8}", role => 'RELOP', meaning => 'very-much-less-than'); } });
+# # Note that in <<<, the leading << will already have been converted to \ll !!!
+DefMathLigature("<="        => "\x{2264}", role => 'RELOP', meaning => 'less-than-or-equals');
+DefMathLigature("<<"        => "\x{226A}", role => 'RELOP', meaning => 'much-less-than');
+DefMathLigature("\x{226A}<" => "\x{22D8}", role => 'RELOP', meaning => 'very-much-less-than');
 
 # Recognize: >=, >> and >>>
-DefMathLigature(sub { my ($document, @nodes) = @_;
-    if ((scalar(@nodes) > 2)
-      && TestNode($nodes[-2], 'ltx:XMTok', '>')) {
-      if (TestNode($nodes[-1], 'ltx:XMTok', '=')) {
-        (2, "\x{2265}", role => 'RELOP', meaning => 'greater-than-or-equals'); }
-      elsif (TestNode($nodes[-1], 'ltx:XMTok', '>')) {
-        (2, "\x{226B}", role => 'RELOP', meaning => 'much-greater-than'); } } });
-DefMathLigature(sub { my ($document, @nodes) = @_;
-    if ((scalar(@nodes) > 2)
-      && TestNode($nodes[-2], 'ltx:XMTok', "\x{226B}")
-      && TestNode($nodes[-1], 'ltx:XMTok', '>')) {
-      (2, "\x{22D9}", role => 'RELOP', meaning => 'very-much-greater-than'); } });
+DefMathLigature(">="        => "\x{2265}", role => 'RELOP', meaning => 'greater-than-or-equals');
+DefMathLigature(">>"        => "\x{226B}", role => 'RELOP', meaning => 'much-greater-than');
+DefMathLigature("\x{226B}>" => "\x{22D8}", role => 'RELOP', meaning => 'very-much-greater-than');
 
 #======================================================================
 # Combine letters, when the fonts are right. (sorta related to mathcode)
 # well, maybe a letter followed by letters & digits?
-DefMathLigature(sub { my ($document, @nodes) = @_;
+DefMathLigature(matcher => sub { my ($document, $node) = @_;
     my @chars = ();
-    my $font  = $document->getNodeFont($nodes[-1]);
+    my $font  = $document->getNodeFont($node);
     if ($font->isSticky) {
-      my $node;
       my $n      = 0;
       my $string = '';
       my $s      = '';
-      while (($node = pop(@nodes))
+      while ($node
         && ($document->getModel->getNodeQName($node) eq 'ltx:XMTok')
         && ($document->getNodeFont($node)->equals($font))
         && (!$node->hasAttribute('name'))
         && ((($node->getAttribute('role') || 'UNKNOWN') eq 'UNKNOWN')
           || (($node->getAttribute('role') || 'UNKNOWN') eq 'NUMBER'))
         && (($s = $node->textContent . $s) =~ /^[0-9a-zA-Z]+$/)) {
-        $n++; $string = $s; }
+        $n++; $string = $s;
+        $node = $node->previousSibling; }
       (($string =~ /^[a-zA-Z]/) && ($n > 1) ? ($n, $string, role => 'UNKNOWN', meaning => undef) : undef);
 } });
 
@@ -4040,17 +4044,17 @@ our %space_chars = (negthinspace => '', thinspace => "\x{2009}",
 
 my %decimal_separator   = (en => '.', de => ',', fr => ',', nl => ',', pt => ',', es => ',');
 my %thousands_separator = (en => ',', de => '.', fr => '.', nl => '.', pt => '.', es => '.');
-DefMathLigature(sub { my ($document, @nodes) = @_;
-    my $lang = $document->getNodeLanguage($nodes[-1]);
+DefMathLigature(matcher => sub { my ($document, $node) = @_;
+    my $lang = $document->getNodeLanguage($node);
     $lang =~ s/-\w+$// if $lang;    # strip off region code, if any.
     my $dec  = ($lang && $decimal_separator{$lang})   || '.';
     my $thou = ($lang && $thousands_separator{$lang}) || ',';
     my $decrole = ($dec eq '.' ? 'PERIOD' : '');
     # my $skip  = Dimension('5mu')->valueOf;
     my @chars = ();
-    my ($n, $node, $string, $number, $w) = (0, undef, '', '', 0);
+    my ($n, $string, $number, $w) = (0, '', '', 0);
     # NOTE: We're scanning chars from END!
-    while ($node = pop(@nodes)) {
+    while ($node) {
       my $qn = $document->getModel->getNodeQName($node);
       if ($qn =~ /^(ltx:XMTok|ltx:XMWrap)$/) {
         my $r = ($node->getAttribute('role') || '');
@@ -4080,7 +4084,7 @@ DefMathLigature(sub { my ($document, @nodes) = @_;
           last; } }
       else {
         last; }
-      $n++; }
+      $n++; $node = $node->previousSibling; }
     if (($n > 1) && ($number =~ /\d/)) {
       ($n, $string, meaning => $number, role => 'NUMBER'); } });
 
@@ -4852,9 +4856,9 @@ DefConstructorI('\@math@italiccorr', undef,
 DefPrimitiveI('\@text@italiccorr', undef, "", alias => '\/');
 
 # What kind of magic might allow \mskip to translate these back into the above?
-DefMacroI('\thinmuskip',  undef, "3 mu");
-DefMacroI('\medmuskip',   undef, "4mu plus 2mu minus 4mu");
-DefMacroI('\thickmuskip', undef, "5mu plus 5mu");
+DefRegister('\thinmuskip'  => MuGlue("3mu"));
+DefRegister('\medmuskip'   => MuGlue("4mu plus 2mu minus 4mu"));
+DefRegister('\thickmuskip' => MuGlue("5mu plus 5mu"));
 
 #======================================================================
 # TeX Book, Appendix B. p. 358
@@ -5343,20 +5347,12 @@ DefConstructorI('\dots', undef,
 # Pretest for XMath to keep from interpreting math that the DOM may not allow!!
 ##DefMathRewrite(xpath=>'descendant-or-self::ltx:XMath',match=>'\cdot\cdot\cdot',replace=>'\cdots');
 
-DefMathLigature(sub { my ($document, @nodes) = @_;
-    if ((scalar(@nodes) > 3)
-      && !grep { ($document->getModel->getNodeQName($_) ne 'ltx:XMTok') || ($_->textContent ne "\x{22C5}") }
-      @nodes[$#nodes - 2 .. $#nodes]) {
-      (3, "\x{22EF}", name => 'cdots', role => 'ID'); } });
+DefMathLigature("\x{22C5}\x{22C5}\x{22C5}" => "\x{22EF}", role => 'ID', name => 'cdots');
+
 DefLigature(qr{\.\.\.}, "\x{2026}", fontTest => sub { $_[0]->getFamily ne 'typewriter'; });  # ldots
 
 #DefMathRewrite(xpath=>'descendant-or-self::ltx:XMath',match=>'...',replace=>'\ldots');
-
-DefMathLigature(sub { my ($document, @nodes) = @_;
-    if ((scalar(@nodes) >= 3)
-      && !grep { ($document->getModel->getNodeQName($_) ne 'ltx:XMTok') || ($_->textContent ne ".") }
-      @nodes[$#nodes - 2 .. $#nodes]) {
-      (3, "\x{2026}", name => 'ldots', role => 'ID'); } });
+DefMathLigature("..." => "\x{2026}", role => 'ID', name => 'ldots');
 
 #----------------------------------------------------------------------
 # Math Accents.
@@ -5508,7 +5504,7 @@ DefConstructor('\right@hidden@egroup', '',
 DefMacro('\right XToken', '\right@hidden@egroup\@right #1');
 
 DefConstructor('\@left Token',
-  "?#char(<ltx:XMTok role='#role' name='#name'>#char</ltx:XMTok>)"
+  "?#char(<ltx:XMTok role='#role' name='#name' stretchy='#stretchy'>#char</ltx:XMTok>)"
     . "(?#hint(<ltx:XMHint/>)(#1))",
   afterDigest => sub { my ($stomach, $whatsit) = @_;
     my $arg   = $whatsit->getArg(1);
@@ -5517,8 +5513,9 @@ DefConstructor('\@left Token',
       $whatsit->setProperty(hint => 1); }
     elsif (my $entry = $DELIMITER_MAP{$delim}) {
       $whatsit->setProperties(role => $$entry{lrole},
-        char => $$entry{char},
-        name => $$entry{name});
+        char     => $$entry{char},
+        name     => $$entry{name},
+        stretchy => 'true');
       $whatsit->setFont($arg->getFont()); }
     elsif (($arg->getProperty('role') || '') eq 'OPEN') {
       $arg->setProperty(stretchy => 'true'); }
@@ -5528,7 +5525,7 @@ DefConstructor('\@left Token',
     return; },
   alias => '\left');
 DefConstructor('\@right Token',
-  "?#char(<ltx:XMTok role='#role' name='#name'>#char</ltx:XMTok>)"
+  "?#char(<ltx:XMTok role='#role' name='#name' stretchy='#stretchy'>#char</ltx:XMTok>)"
     . "(?#hint(<ltx:XMHint/>)(#1))",
   afterDigest => sub { my ($stomach, $whatsit) = @_;
     my $arg   = $whatsit->getArg(1);
@@ -5537,8 +5534,9 @@ DefConstructor('\@right Token',
       $whatsit->setProperty(hint => 1); }
     elsif (my $entry = $DELIMITER_MAP{$delim}) {
       $whatsit->setProperties(role => $$entry{rrole},
-        char => $$entry{char},
-        name => $$entry{name});
+        char     => $$entry{char},
+        name     => $$entry{name},
+        stretchy => 'true');
       $whatsit->setFont($arg->getFont()); }
     elsif (($arg->getProperty('role') || '') eq 'CLOSE') {
       $arg->setProperty(stretchy => 'true'); }
@@ -6045,12 +6043,13 @@ DefLigature(qr{---}, "\x{2014}",
 # Ligatures for doubled single left & right quotes to convert to double quotes
 # [should ligatures be part of a font, in the first place? (it is in TeX!)
 DefLigature(qr{\x{2018}\x{2018}}, "\x{201C}",
-  fontTest => sub { ($_[0]->getFamily ne 'typewriter') && (($_[0]->getEncoding || 'OT1') eq 'OT1'); });
+  fontTest => sub { ($_[0]->getFamily ne 'typewriter')
+      && (($_[0]->getEncoding || 'OT1') =~ /^(OT1|T1)$/); });    # is this needed?
 DefLigature(qr{\x{2019}\x{2019}}, "\x{201D}",
-  fontTest => sub { ($_[0]->getFamily ne 'typewriter') && (($_[0]->getEncoding || 'OT1') eq 'OT1'); });
-
+  fontTest => sub { ($_[0]->getFamily ne 'typewriter')
+      && (($_[0]->getEncoding || 'OT1') =~ /^(OT1|T1)$/); });
 DefPrimitiveI('\TeX', undef, 'TeX');
-DefPrimitiveI('\i',   undef, "\x{0131}");    # LATIN SMALL LETTER DOTLESS I
+DefPrimitiveI('\i',   undef, "\x{0131}");                        # LATIN SMALL LETTER DOTLESS I
 DefPrimitiveI('\j',   undef, "\x{0237}");
 
 DefConstructor('\buildrel Until:\over {}',
@@ -6162,6 +6161,9 @@ DefConstructor('\@PADDED[MuDimension]{MuDimension}{}',
   afterConstruct => sub {
     my ($document, $whatsit) = @_;
     my $node = $document->getLastChildElement($document->getNode);
+    if ($document->getNodeQName($node) eq 'ltx:XMDual') {
+      my (@ch) = $node->childNodes;
+      $node = $ch[1]; }
     if (my $lpadding = $whatsit->getArg(1)) {
       $document->setAttribute($node, lpadding => $lpadding); }
     if (my $rpadding = $whatsit->getArg(2)) {
@@ -6235,7 +6237,6 @@ DefConstructor('\lx@text@nounicode DefToken',
 # and establish an id and idref later.
 DefConstructor('\@XMArg{}{}', "<ltx:XMArg _xmkey='#1'>#2</ltx:XMArg>",
   reversion   => '#2',
-  bounded     => 1,
   afterDigest => sub {
     AssignValue('xref:' . ToString($_[1]->getArg(1)) => $_[1], 'global'); });
 DefConstructor('\@XMRef{}', "<ltx:XMRef _xmkey='#1'/>",

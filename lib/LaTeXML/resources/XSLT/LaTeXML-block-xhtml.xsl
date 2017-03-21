@@ -21,6 +21,8 @@
     extension-element-prefixes="func f"
     exclude-result-prefixes = "ltx func f">
 
+  <xsl:param name="SIMPLIFY_HTML"></xsl:param>
+
   <!-- ======================================================================
        Various Block-level elements:
        ltx:p, ltx:equation, ltx:equationgroup, ltx:quote, ltx:block,
@@ -126,10 +128,9 @@
     <xsl:element name="{f:blockelement($context,'div')}" namespace="{$html_ns}">
       <xsl:attribute name="class">ltx_listing_data</xsl:attribute>
       <xsl:element name="a" namespace="{$html_ns}">
-        <xsl:attribute name="href">
-<!--          <xsl:value-of select="concat('data:text/plain;base64,',@data)"/>-->
-          <xsl:value-of select="concat('data:text/plain,',@data)"/>
-        </xsl:attribute>
+        <xsl:call-template name="add_data_attribute">
+          <xsl:with-param name="name" select="'href'"/>
+        </xsl:call-template>
         <xsl:text>&#x2B07;</xsl:text>
       </xsl:element>
     </xsl:element>
@@ -379,44 +380,50 @@
        Aligned templates -->
 
   <!-- typical table arrangement for numbered equation w/constraint:
+       (Note that number is vertically centered across the equation rows, but NOT the constraint)
+       (Note that the equation rows will be wrapped in a tbody as attachment for the id)
        _______________________________
-       | (1) | pad | lhs | =rhs | pad |
-       |     |_____|_____|______|_____|
+       |     | pad | lhs | =rhs | pad |
+       | (1) |_____|_____|______|_____|
        |     | pad |     | =rhs | pad |
-       |     |_____|_____|______|_____|
-       |     |             constraint |
-       |_____|________________________|  
+       |_____|_____|_____|______|_____|
+       |                   constraint |
+       |______ _______________________|
 
        typical arrangement for numbered equations in equationgroup
        (ignores the number (if any) on the equationgroup)
+       (Note that each set of equation rows will be wrapped in a tbody as attachment for the id)
        _______________________________
-       | (1) | pad | lhs | =rhs | pad |
-       |     |_____|_____|______|_____|
+       |     | pad | lhs | =rhs | pad |
+       | (1) |_____|_____|______|_____|
        |     | pad |     | =rhs | pad |
-       |     |_____|_____|______|_____|
-       |     |             constraint |
-       |_____|________________________|  
-       | (2) | pad | lhs | =rhs | pad |
-       |     |_____|_____|______|_____|
+       |_____|_____|_____|______|_____|
+       |                   constraint |
+       |_____ ________________________|
+       |     | pad | lhs | =rhs | pad |
+       | (2) |_____|_____|______|_____|
        |     | pad |     | =rhs | pad |
-       |     |_____|_____|______|_____|
-       |     |             constraint |
-       |_____|________________________|  
+       |_____|_____|_____|______|_____|
+       |                   constraint |
+       |_____ ________________________|
 
        typical arrangement for unnumbered equations in numbered equationgroup
+       (Note that the equation number is centered across all content, including any constraints)
+       (Note that the rows of eqach equation cannot be wrapped in a tbody,
+       since the equationnumber column must span all rows; it cannot span across tbody's!)
        _______________________________
-       | (1) | pad | lhs | =rhs | pad |
-       |     |_____|_____|______|_____|
-       |     | pad |     | =rhs | pad |
-       |     |_____|_____|______|_____|
-       |     |             constraint |
-       |     |________________________|  
        |     | pad | lhs | =rhs | pad |
        |     |_____|_____|______|_____|
        |     | pad |     | =rhs | pad |
        |     |_____|_____|______|_____|
        |     |             constraint |
-       |_____|________________________|  
+       | (1) |________________________|
+       |     | pad | lhs | =rhs | pad |
+       |     |_____|_____|______|_____|
+       |     | pad |     | =rhs | pad |
+       |     |_____|_____|______|_____|
+       |     |             constraint |
+       |_____|________________________|
 
   -->
 
@@ -533,8 +540,10 @@
     <xsl:param name="eqnopos"
                select="f:if(ancestor-or-self::*[contains(@class,'ltx_leqno')],'left','right')"/>
     <xsl:choose>
-      <xsl:when test="$eqnopos != $side"/>                       <!-- Wrong side: Nothing -->
-      <xsl:when test="ancestor-or-self::ltx:equationgroup[position()=1][@refnum][not(descendant::ltx:equation[@refnum])]"> <!-- eqn.group is numbered, but not eqns! -->
+      <!-- Wrong side: Nothing -->
+      <xsl:when test="$eqnopos != $side"/>
+      <!-- equationgroup is numbered, but NOT equations! -->
+      <xsl:when test="ancestor-or-self::ltx:equationgroup[position()=1][@refnum][not(descendant::ltx:equation[@refnum])]">
         <!-- place number only for 1st row -->
         <xsl:if test="(ancestor-or-self::ltx:tr and not(preceding-sibling::ltx:tr))
                       or (not(ancestor-or-self::ltx:tr) and not(preceding-sibling::ltx:equation))">
@@ -561,12 +570,13 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
             </xsl:element>
         </xsl:if>                                              <!--Else NOTHING (rowspan'd!) -->
       </xsl:when>
-      <xsl:when test="ancestor-or-self::ltx:equation[position()=1][@refnum]">        <!-- equation is numbered! -->
+      <!-- equation is numbered! (but not equationgroup, if any) -->
+      <xsl:when test="ancestor-or-self::ltx:equation[position()=1][@refnum]">
         <!-- place number only for 1st row -->
         <xsl:if test="(ancestor-or-self::ltx:tr and not(preceding-sibling::ltx:tr))
                       or not(ancestor-or-self::ltx:tr)">
           <!-- Count the MathFork rows, the MathForks w/only implicit row,
-               or if not MathFork'd at all, and also any constraints.-->
+               or if not MathFork'd at all; but NOT any constraints.-->
           <xsl:variable name="nrows"
                         select="count(
                                 ancestor-or-self::ltx:equation[position()=1][@refnum]
@@ -575,7 +585,6 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
                                 [ltx:MathFork/ltx:MathBranch[1]/ltx:td]
                                 | ancestor-or-self::ltx:equation[position()=1][@refnum]
                                 [ltx:Math or ltx:MathFork/ltx:MathBranch[not(ltx:tr or ltx:td)]]
-                                | ancestor-or-self::ltx:equation[position()=1][@refnum]/ltx:constraint
                                 )"/>
           <xsl:text>&#x0A;</xsl:text>
           <xsl:element name="{f:blockelement($context,'td')}" namespace="{$html_ns}">
@@ -687,15 +696,21 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
         </xsl:apply-templates>
       </xsl:when>
       <!-- Nested, but only 1 deep; introduce a tbody-->
+      <!-- not sure, reallly; can't nest tbody's 
       <xsl:when test="not(parent::ltx:equationgroup[ancestor::ltx:equationgroup])">
         <xsl:element name="{f:blockelement($context,'tbody')}" namespace="{$html_ns}">
+          <xsl:attribute name="class">case1</xsl:attribute>
           <xsl:call-template name="add_id"/>
+          <xsl:element name="tr" namespace="{$html_ns}">
+            <xsl:attribute name="class">case1</xsl:attribute>
+          </xsl:element>
           <xsl:apply-templates select="." mode="ininalignment">
             <xsl:with-param name="ncolumns" select="$ncolumns"/>
             <xsl:with-param name="context" select="$context"/>
           </xsl:apply-templates>
         </xsl:element>
       </xsl:when>
+      -->
       <!-- Sloppy case, we at least need an empty row to put the id on; Ugh -->
       <xsl:otherwise>
         <xsl:element name="{f:blockelement($context,'tr')}" namespace="{$html_ns}">
@@ -718,7 +733,6 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
   <xsl:template match="ltx:equationgroup" mode="ininalignment">
     <xsl:param name="context"/>
     <xsl:param name="ncolumns"/>
-    <!-- This is pretty lame, but if there's an id, we better put it SOMEPLACE! -->
     <xsl:apply-templates select="." mode="inalignment-begin">
       <xsl:with-param name="ncolumns" select="$ncolumns"/>
       <xsl:with-param name="context" select="$context"/>
@@ -740,15 +754,51 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
   <xsl:template match="ltx:equation" mode="inalignment">
     <xsl:param name="context"/>
     <xsl:param name="ncolumns"/>
+    <xsl:text>&#x0A;</xsl:text>
+    <xsl:choose>
+      <!-- no outer equationgroup, so id has already been handled. -->
+      <xsl:when test="not(parent::ltx:equationgroup)">
+        <xsl:apply-templates select="." mode="ininalignment">
+          <xsl:with-param name="ncolumns" select="$ncolumns"/>
+          <xsl:with-param name="context" select="$context"/>
+          <xsl:with-param name="need_id" select="false()"/>
+        </xsl:apply-templates>
+      </xsl:when>
+      <!-- have refnum, which may span, so need containing tbody to hold id -->
+      <xsl:when test="@refnum">
+        <xsl:element name="{f:blockelement($context,'tbody')}" namespace="{$html_ns}">
+          <xsl:call-template name="add_id"/>
+          <xsl:apply-templates select="." mode="ininalignment">
+            <xsl:with-param name="ncolumns" select="$ncolumns"/>
+            <xsl:with-param name="context" select="$context"/>
+            <xsl:with-param name="need_id" select="false()"/>
+          </xsl:apply-templates>
+        </xsl:element>
+      </xsl:when>
+      <!-- otherwise, we'll need to punt with id (if any) on 1st row -->
+      <xsl:otherwise>
+        <xsl:apply-templates select="." mode="ininalignment">
+          <xsl:with-param name="ncolumns" select="$ncolumns"/>
+          <xsl:with-param name="context" select="$context"/>
+          <xsl:with-param name="need_id" select="true()"/>
+        </xsl:apply-templates>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+          
+  <!-- inside table, and id (if any) already handled -->
+  <xsl:template match="ltx:equation" mode="ininalignment">
+    <xsl:param name="context"/>
+    <xsl:param name="ncolumns"/>
+    <xsl:param name="need_id"/>    
     <xsl:param name="eqpos"
                select="f:if(ancestor-or-self::*[contains(@class,'ltx_fleqn')],'left','center')"/>
-    <xsl:text>&#x0A;</xsl:text>
     <xsl:choose>
       <!-- Case 1: (possibly) Multi-line equation -->
       <xsl:when test="ltx:MathFork/ltx:MathBranch[1]/ltx:tr">
         <xsl:element name="{f:blockelement($context,'tr')}" namespace="{$html_ns}">
           <!-- Note that the id is only going on the 1st row! -->
-          <xsl:if test="parent::ltx:equationgroup"> <!--Don't duplicate id! -->
+          <xsl:if test="$need_id">
             <xsl:call-template name="add_id"/>
           </xsl:if>
           <xsl:call-template name="add_attributes">
@@ -788,7 +838,7 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
       <!-- Case 2: Single line, (possibly) multiple columns -->
       <xsl:when test="ltx:MathFork/ltx:MathBranch[1]">
         <xsl:element name="{f:blockelement($context,'tr')}" namespace="{$html_ns}">
-          <xsl:if test="parent::ltx:equationgroup"> <!--Don't duplicate id! -->
+          <xsl:if test="$need_id"> <!--Don't duplicate id! -->
             <xsl:call-template name="add_id"/>
           </xsl:if>
           <xsl:call-template name="add_attributes">
@@ -813,7 +863,7 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
       <!-- Case : default; just an unaligned equation, presumably within a group-->
       <xsl:otherwise>
         <xsl:element name="{f:blockelement($context,'tr')}" namespace="{$html_ns}">
-          <xsl:if test="parent::ltx:equationgroup"> <!--Don't duplicate id! -->
+          <xsl:if test="$need_id"> <!--Don't duplicate id! -->
             <xsl:call-template name="add_id"/>
           </xsl:if>
           <xsl:call-template name="add_attributes">
@@ -873,7 +923,8 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
           <xsl:attribute name="class">ltx_eqn_cell ltx_align_right</xsl:attribute>
           <!-- the $ncolumns of math, plus whatever endpadding, but NOT the number-->
           <xsl:attribute name="colspan">
-            <xsl:value-of select="$ncolumns+2"/>
+            <xsl:value-of select="$ncolumns+2 + f:if(ancestor-or-self::ltx:equation[@refnum],1,0)"/>
+          <!--<xsl:value-of select="$ncolumns+2"/>-->
           </xsl:attribute>
           <xsl:apply-templates select="." mode="constraints">
             <xsl:with-param name="context" select="$context"/>
@@ -1015,6 +1066,21 @@ ancestor-or-self::ltx:equationgroup[position()=1][@refnum]/descendant::ltx:equat
     <xsl:param name="context"/>
     <xsl:text>&#x0A;</xsl:text>
     <xsl:choose>
+      <xsl:when test="$SIMPLIFY_HTML">
+        <xsl:element name="{f:blockelement($context,'li')}" namespace="{$html_ns}">
+          <xsl:call-template name="add_id"/>
+          <xsl:call-template name="add_attributes"/>
+          <xsl:apply-templates select="." mode="begin">
+            <xsl:with-param name="context" select="$context"/>
+          </xsl:apply-templates>
+          <xsl:apply-templates select="*[local-name() != 'tag']">
+            <xsl:with-param name="context" select="$context"/>
+          </xsl:apply-templates>
+          <xsl:apply-templates select="." mode="end">
+            <xsl:with-param name="context" select="$context"/>
+          </xsl:apply-templates>
+        </xsl:element>
+      </xsl:when>
       <xsl:when test="child::ltx:tag">
         <xsl:element name="{f:blockelement($context,'li')}" namespace="{$html_ns}">
           <xsl:call-template name="add_id"/>

@@ -47,6 +47,7 @@ use LaTeXML::Util::Radix;
 use File::Which;
 use Unicode::Normalize;
 use Text::Balanced;
+use Text::Unidecode;
 use base qw(Exporter);
 our @EXPORT = (qw(&DefAutoload &DefExpandable
     &DefMacro &DefMacroI
@@ -490,6 +491,7 @@ sub CleanID {
   $key =~ s/,/-comma-/g;
   $key =~ s/%/-pct-/g;
   $key =~ s/&/-amp-/g;
+  $key = unidecode($key);
   $key =~ s/[^\w\_\-.]//g;                 # remove everything else.
   return $key; }
 
@@ -765,7 +767,7 @@ sub GenerateID {
     my $ancestor = $document->findnode('ancestor::*[@xml:id][1]', $node)
       || $document->getDocument->documentElement;
     ## Old versions don't like $ancestor->getAttribute('xml:id');
-    my $ancestor_id = $ancestor && $ancestor->getAttributeNS("http://www.w3.org/XML/1998/namespace", 'id');
+    my $ancestor_id = $ancestor && $ancestor->getAttributeNS($LaTeXML::Common::XML::XML_NS, 'id');
     # If we've got no $ancestor_id, then we've got no $ancestor (no document yet!),
     # or $ancestor IS the root element (but without an id);
     # If we also have no $prefix, we'll end up with an illegal id (just digits)!!!
@@ -1514,7 +1516,9 @@ sub defmath_prim {
 sub defmath_cons {
   my ($cs, $paramlist, $presentation, %options) = @_;
   # do we need to do anything about digesting the presentation?
-  my $end_tok   = (defined $presentation ? '>' . ToString($presentation) . '</ltx:XMTok>' : "/>");
+  my $qpresentation = $presentation && ToString($presentation);    # Quote any constructor specials
+  $qpresentation =~ s/(\#|\&|\?|\\)/\\$1/g if $presentation;
+  my $end_tok   = (defined $presentation ? '>' . $qpresentation . '</ltx:XMTok>' : "/>");
   my $cons_attr = "name='#name' meaning='#meaning' omcd='#omcd' mathstyle='#mathstyle'";
   my $nargs     = ($paramlist ? scalar($paramlist->getParameters) : 0);
   $STATE->installDefinition(LaTeXML::Core::Definition::Constructor->new($cs, $paramlist,
@@ -1523,7 +1527,7 @@ sub defmath_cons {
         ? ($presentation !~ /(?:\(|\)|\\)/
           ? "?#isMath(<ltx:XMTok role='#role' scriptpos='#scriptpos' stretchy='#stretchy'"
             . " font='#font' $cons_attr$end_tok)"
-            . "($presentation)"
+            . "($qpresentation)"
           : "<ltx:XMTok role='#role' scriptpos='#scriptpos' stretchy='#stretchy'"
             . " font='#font' $cons_attr$end_tok")
         : "<ltx:XMApp role='#role' scriptpos='#scriptpos' stretchy='#stretchy'>"
@@ -1748,8 +1752,10 @@ sub FindFile_aux {
   if (defined LookupValue($file . '_contents')) {
     return $file; }
   if (pathname_is_absolute($file)) {    # And if we've got an absolute path,
-    return $file if -f $file;           # No need to search, just check if it exists.
-    return; }                           # otherwise we're never going to find it.
+    if (!$options{noltxml}) {
+      return $file . '.ltxml' if -f $file . '.ltxml'; }    # No need to search, just check if it exists.
+    return $file if -f $file;                              # No need to search, just check if it exists.
+    return; }                                              # otherwise we're never going to find it.
   elsif (pathname_is_nasty($file)) {    # If it is a nasty filename, we won't touch it.
     return; }                           # we DO NOT want to pass this to kpathse or such!
 
@@ -2430,12 +2436,45 @@ sub DefLigature {
       %options });
   return; }
 
-my $math_ligature_options = {};    # [CONSTANT]
+my $old_math_ligature_options = {};                                                  # [CONSTANT]
+my $math_ligature_options = { matcher => 1, role => 1, name => 1, meaning => 1 };    # [CONSTANT]
 
 sub DefMathLigature {
-  my ($matcher, %options) = @_;
-  CheckOptions("DefMathLigature", $math_ligature_options, %options);
-  UnshiftValue('MATH_LIGATURES', { matcher => $matcher, %options });
+  if ((scalar(@_) % 2) == 1) {                                                       # Old style!
+    my ($matcher, %options) = @_;
+    Info('deprecated', 'ligature', undef, "Old style arguments to DefMathLigature; please update");
+    CheckOptions("DefMathLigature", $old_math_ligature_options, %options);
+    UnshiftValue('MATH_LIGATURES', { old_style => 1, matcher => $matcher }); }       # Install it...
+  else {                                                                             # new style!
+    my (%options) = @_;
+    my $matcher = $options{matcher};
+    delete $options{matcher};
+    my ($pattern) = grep { !$$math_ligature_options{$_} } keys %options;
+    my $replacement = $pattern && $options{$pattern};
+    delete $options{$pattern} if $replacement;
+    CheckOptions("DefMathLigature", $math_ligature_options, %options);    # Check remaining options
+    if ($matcher && $pattern) {
+      Error('misdefined', 'MathLigature', undef,
+        "DefMathLigature only gets one of matcher or pattern=>replacement keywords");
+      return; }
+    elsif ($pattern) {
+      my @chars    = reverse(split(//, $pattern));
+      my $ntomatch = scalar(@chars);
+      my %attr     = %options;
+      $matcher = sub {
+        my ($document, $node) = @_;
+        foreach my $char (@chars) {
+          return unless
+            ($node
+            && ($document->getModel->getNodeQName($node) eq 'ltx:XMTok')
+            && (($node->textContent || '') eq $char));
+          $node = $node->previousSibling; }
+        return ($ntomatch, $replacement, %attr); }; }
+    elsif (!$matcher) {
+      Error('misdefined', 'MathLigature', undef,
+        "DefMathLigature missing matcher or pattern=>replacement keywords");
+      return; }
+    UnshiftValue('MATH_LIGATURES', { matcher => $matcher }); }    # Install it...
   return; }
 
 #======================================================================
@@ -2488,7 +2527,7 @@ sub ProcessPendingResources {
 
 __END__
 
-=pod 
+=pod
 
 =head1 NAME
 
@@ -2684,7 +2723,7 @@ For C<XUntil>, tokens are expanded as they are matched and accumulated.
 =item C<UntilBrace>
 
 X<UntilBrace>
-Reads tokens until the next open brace C<{>.  
+Reads tokens until the next open brace C<{>.
 This corresponds to the peculiar TeX construct C<\def\foo#{...>.
 
 =item C<Match:I<match(|match)*> | Keyword:>I<match(|match)*>>
@@ -2913,7 +2952,7 @@ or I<cannot> appear, in math mode.
 
 =item C<beforeDigest=E<gt>I<code>($stomach)>
 
-supplies a hook to execute during digestion 
+supplies a hook to execute during digestion
 just before the main part of the primitive is executed
 (and before any arguments have been read).
 The I<code> should either return nothing (return;)
@@ -2971,7 +3010,7 @@ specifies if it is not allowed to change this value.
 
 =item C<setter=E<gt>I<code>($value,@args)>
 
-By default I<value> is stored in the State's Value table under a name concatenating the 
+By default I<value> is stored in the State's Value table under a name concatenating the
 control sequence and argument values.  These options allow other means of fetching and
 storing the value.
 
@@ -3146,7 +3185,7 @@ have already been separated; useful for definitions from within code.
 
 X<DefMath>
 A common shorthand constructor; it defines a control sequence that creates a mathematical object,
-such as a symbol, function or operator application.  
+such as a symbol, function or operator application.
 The options given can effectively create semantic macros that contribute to the eventual
 parsing of mathematical content.
 In particular, it generates an XMDual using the replacement I<tex> for the presentation.
@@ -3556,7 +3595,7 @@ or it can be a code reference which is treated as a primitive for side-effect.
 If a package or class wants to accomodate options, it should start
 with one or more C<DeclareOptions>, followed by C<ProcessOptions()>.
 
-=item C<PassOptions(I<name>, I<ext>, I<@options>); >>
+=item C<PassOptions(I<name>, I<ext>, I<@options>); >
 
 X<PassOptions>
 Causes the given I<@options> (strings) to be passed to the package
@@ -3576,7 +3615,7 @@ order they were used, like C<ProcessOptions*>.
 X<ExecuteOptions>
 Process the options given explicitly in I<@options>.
 
-=item C<AtBeginDocument(I<@stuff>); >>
+=item C<AtBeginDocument(I<@stuff>); >
 
 X<AtBeginDocument>
 Arranges for I<@stuff> to be carried out after the preamble, at the beginning of the document.
@@ -3587,7 +3626,7 @@ or C<I<code>($gullet)> which would yeild tokens to be expanded.
 This operation is useful for style files loaded with C<--preload> or document specific
 customization files (ie. ending with C<.latexml>); normally the contents would be executed
 before LaTeX and other style files are loaded and thus can be overridden by them.
-By deferring the evaluation to begin-document time, these contents can override those style files. 
+By deferring the evaluation to begin-document time, these contents can override those style files.
 This is likely to only be meaningful for LaTeX documents.
 
 =item C<AtEndDocument(I<@stuff>)>
@@ -3838,17 +3877,23 @@ is applied only when C<fontTest> returns true.
 Predefined Ligatures combine sequences of "." or single-quotes into appropriate
 Unicode characters.
 
-=item C<DefMathLigature(I<code>($document,@nodes));>
+=item C<DefMathLigature(I<$string>C<=>>I<$replacment>,I<%options>);>
 
 X<DefMathLigature>
-I<code> is called on each sequence of math nodes at a given level.  If they should
-be replaced, return a list of C<($n,$string,%attributes)> to replace
-the text content of the first node with C<$string> content and add the given attributes.
-The next C<$n-1> nodes are removed.  If no replacement is called for, CODE
-should return undef.
+A Math Ligature typically combines a sequence of math tokens (XMTok) into a single one.
+A simple example is
 
-Predefined Math Ligatures combine letter or digit Math Tokens (XMTok) into multicharacter
-symbols or numbers, depending on the font (non math italic).
+   DefMathLigature(":=" => ":=", role => 'RELOP', meaning => 'assign');
+
+replaces the two tokens for colon and equals by a token representing assignment.
+The options are those characterising an XMTok, namely: C<role>, C<meaning> and C<name>.
+
+For more complex cases (recognizing numbers, for example), you may supply a
+function C<matcher=>CODE($document,$node)>, which is passed the current document
+and the last math node in the sequence.  It should examine C<$node> and any preceding
+nodes (using C<previousSibling>) and return a list of C<($n,$string,%attributes)> to replace
+the C<$n> nodes by a new one with text content being C<$string> content and the given attributes.
+If no replacement is called for, CODE should return undef.
 
 =back
 
@@ -3864,7 +3909,7 @@ document can take place.
 X<DefRewrite>X<DefMathRewrite>
 These two declarations define document rewrite rules that are applied to the
 document tree after it has been constructed, but before math parsing, or
-any other postprocessing, is done.  The I<%specification> consists of a 
+any other postprocessing, is done.  The I<%specification> consists of a
 sequence of key/value pairs with the initial specs successively narrowing the
 selection of document nodes, and the remaining specs indicating how
 to modify or replace the selected nodes.
@@ -4010,7 +4055,7 @@ used for other definitions, except that macro being defined is a single characte
 The I<expansion> is a string specifying what it should expand into,
 typically more verbose column specification.
 
-=item C<DefKeyVal(I<keyset>, I<key>, I<type>, I<default>); >>
+=item C<DefKeyVal(I<keyset>, I<key>, I<type>, I<default>); >
 
 X<DefKeyVal>
 Defines a keyword I<key> used in keyval arguments for the set I<keyset>.
@@ -4138,7 +4183,7 @@ tokens, or if defined, have the same definition.
 
 =over
 
-=item C<MergeFont(I<%fontspec>); >>
+=item C<MergeFont(I<%fontspec>); >
 
 X<MergeFont>
 Set the current font by merging the font style attributes with the current font.
